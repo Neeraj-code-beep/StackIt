@@ -117,7 +117,34 @@ const questionSchema = new mongoose.Schema({
   deletedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
-  }
+  },
+  embedding: {
+    type: [Number],
+    default: null
+  },
+  isDuplicate: {
+    type: Boolean,
+    default: false
+  },
+  duplicateOf: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Question'
+  },
+  duplicateFlags: [{
+    question: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Question'
+    },
+    score: {
+      type: Number,
+      min: 0,
+      max: 1
+    },
+    flaggedAt: {
+      type: Date,
+      default: Date.now
+    }
+  }]
 }, {
   timestamps: true
 })
@@ -225,6 +252,7 @@ questionSchema.pre('save', function(next) {
 // JSON serialization
 questionSchema.methods.toJSON = function() {
   const question = this.toObject()
+  delete question.embedding
   question.voteCount = this.voteCount
   question.totalVotes = this.totalVotes
   question.isAnswered = this.isAnswered

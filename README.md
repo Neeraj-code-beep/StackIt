@@ -106,7 +106,7 @@ A modern, full-stack Q&A platform built with React, Node.js, and MongoDB. StackI
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/Ashmita1206/Odoo_Hackathon_2025.git
+   git clone https://github.com/Ashmita1206/StackIt.git
    cd stackit-qa-platform
    ```
 

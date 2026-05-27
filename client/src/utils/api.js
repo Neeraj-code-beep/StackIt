@@ -73,4 +73,28 @@ api.interceptors.response.use(
   }
 );
 
+// Semantic search
+export const semanticSearch = async ({ query, tags, status, timeRange, limit }) => {
+  const response = await api.post('/search/semantic', { query, tags, status, timeRange, limit });
+  return response.data;
+};
+
+// Check for duplicate questions (real-time during typing)
+export const checkDuplicate = async ({ title, content, excludeId }) => {
+  const response = await api.post('/questions/check-duplicate', { title, content, excludeId });
+  return response.data;
+};
+
+// Get similar questions
+export const getSimilarQuestions = async (questionId) => {
+  const response = await api.get(`/questions/${questionId}/similar`);
+  return response.data;
+};
+
+// Get duplicate flags for a question
+export const getDuplicateFlags = async (questionId) => {
+  const response = await api.get(`/questions/${questionId}/duplicates`);
+  return response.data;
+};
+
 export default api;
