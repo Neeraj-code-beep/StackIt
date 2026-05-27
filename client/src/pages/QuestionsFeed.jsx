@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from 'react-query';
 import { motion } from 'framer-motion';
@@ -11,8 +11,9 @@ import {
   FiThumbsUp,
   FiEye,
   FiTag,
+  FiZap,
 } from 'react-icons/fi';
-import api from '../utils/api';
+import api, { semanticSearch } from '../utils/api';
 import QuestionCard from '../components/QuestionCard';
 import TagFilter from '../components/TagFilter';
 
@@ -25,6 +26,7 @@ const QuestionsFeed = () => {
     status: 'all',
     timeRange: 'all',
   });
+  const [semanticMode, setSemanticMode] = useState(false);
 
   const {
     data: questionsData,
@@ -41,6 +43,33 @@ const QuestionsFeed = () => {
   );
 
   const fetchQuestions = async () => {
+    if (semanticMode && searchTerm.trim().length > 0) {
+      const result = await semanticSearch({
+        query: searchTerm,
+        tags: selectedTags.join(','),
+        status: filters.status,
+        timeRange: filters.timeRange,
+        limit: 10,
+      });
+
+      return {
+        questions: result.results.map(r => ({
+          ...r,
+          votes: { upvotes: [], downvotes: [] },
+          voteCount: r.voteCount || 0,
+        })),
+        pagination: {
+          currentPage: 1,
+          totalPages: 1,
+          total: result.results.length,
+          hasNext: false,
+          hasPrev: false,
+        },
+        total: result.results.length,
+        semantic: result.semantic,
+      };
+    }
+
     const params = new URLSearchParams({
       page: currentPage,
       limit: 10,
@@ -116,15 +145,34 @@ const QuestionsFeed = () => {
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
               placeholder="Search questions..."
-              className="input-field pl-10 pr-4"
+              className="input-field pl-10 pr-24"
             />
-            <button
-              type="submit"
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 btn-primary py-1 px-4 text-sm"
-            >
-              Search
-            </button>
+            <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center space-x-1">
+              <button
+                type="button"
+                onClick={() => setSemanticMode(!semanticMode)}
+                className={`p-1.5 rounded text-sm transition-colors ${
+                  semanticMode
+                    ? 'bg-primary-100 text-primary-700 dark:bg-primary-900 dark:text-primary-200'
+                    : 'text-navy-400 hover:text-navy-600 dark:hover:text-navy-200'
+                }`}
+                title={semanticMode ? 'Semantic search active' : 'Enable semantic search'}
+              >
+                <FiZap className="w-4 h-4" />
+              </button>
+              <button
+                type="submit"
+                className="btn-primary py-1 px-4 text-sm"
+              >
+                Search
+              </button>
+            </div>
           </div>
+          {semanticMode && (
+            <p className="mt-1 text-xs text-primary-600 dark:text-primary-400">
+              AI-powered semantic search active — results match meaning, not just keywords
+            </p>
+          )}
         </form>
 
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">

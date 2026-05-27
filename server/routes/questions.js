@@ -5,6 +5,8 @@ const Answer = require('../models/Answer')
 const User = require('../models/User')
 const { authenticateToken, requireAdmin } = require('../middleware/auth')
 const { acceptAnswer } = require('../services/answerAcceptance')
+const { generateEmbedding } = require('../services/embeddingService')
+const { findSimilarQuestions, findDuplicates } = require('../services/vectorSearch')
 
 const router = express.Router()
 
@@ -229,11 +231,46 @@ router.post('/', [
       return res.status(400).json({ message: 'At least one valid tag is required' })
     }
 
+    // Check for duplicates before creating
+    const plainText = content.replace(/<[^>]*>/g, '')
+    const checkText = `${title} ${plainText}`
+    let duplicateWarning = null
+    let questionEmbedding = null
+
+    if (checkText.trim().length >= 10) {
+      try {
+        questionEmbedding = await generateEmbedding(checkText)
+        if (questionEmbedding) {
+          const [duplicates, similar] = await Promise.all([
+            findDuplicates(questionEmbedding, 0.85),
+            findSimilarQuestions(questionEmbedding, { limit: 5, threshold: 0.5 })
+          ])
+
+          if (duplicates.length > 0) {
+            duplicateWarning = {
+              type: 'DUPLICATE',
+              message: 'This question appears to be a duplicate of an existing question',
+              duplicates
+            }
+          } else if (similar.length > 0) {
+            duplicateWarning = {
+              type: 'SIMILAR',
+              message: 'Similar questions were found',
+              similar: similar.slice(0, 3)
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Duplicate check during creation failed:', err.message)
+      }
+    }
+
     const question = new Question({
       title,
       content,
       author: req.user._id,
-      tags: validTags.map(tag => tag.toLowerCase())
+      tags: validTags.map(tag => tag.toLowerCase()),
+      embedding: questionEmbedding
     })
 
     await question.save()
@@ -249,7 +286,8 @@ router.post('/', [
         totalVotes: question.totalVotes,
         isAnswered: question.isAnswered,
         isAccepted: question.isAccepted
-      }
+      },
+      duplicateWarning
     })
   } catch (error) {
     console.error('Create question error:', error)
@@ -554,6 +592,95 @@ router.post('/:id/accept-answer', [
   } catch (error) {
     console.error('Accept answer error:', error)
     res.status(error.statusCode || 500).json({ message: error.message || 'Server error' })
+  }
+})
+
+// @route   POST /api/questions/check-duplicate
+// @desc    Check if a question has duplicates (for real-time suggestion)
+// @access  Private
+router.post('/check-duplicate', authenticateToken, async (req, res) => {
+  try {
+    const { title, content, excludeId } = req.body
+
+    const text = `${title} ${content ? content.replace(/<[^>]*>/g, '') : ''}`
+    if (!text || text.trim().length < 10) {
+      return res.json({ duplicates: [], similar: [] })
+    }
+
+    let embedding = null
+    try {
+      embedding = await generateEmbedding(text)
+    } catch (err) {
+      console.error('Embedding generation failed for duplicate check:', err.message)
+      return res.json({ duplicates: [], similar: [], error: 'Embedding unavailable' })
+    }
+
+    const [duplicates, similar] = await Promise.all([
+      findDuplicates(embedding, 0.85),
+      findSimilarQuestions(embedding, { limit: 8, threshold: 0.5, excludeId })
+    ])
+
+    res.json({
+      duplicates,
+      similar,
+      hasDuplicates: duplicates.length > 0,
+      hasSimilar: similar.length > 0
+    })
+  } catch (error) {
+    console.error('Duplicate check error:', error)
+    res.status(500).json({ message: 'Server error' })
+  }
+})
+
+// @route   GET /api/questions/:id/similar
+// @desc    Get similar questions
+// @access  Public
+router.get('/:id/similar', async (req, res) => {
+  try {
+    const question = await Question.findById(req.params.id).select('embedding title')
+    if (!question || question.isDeleted) {
+      return res.status(404).json({ message: 'Question not found' })
+    }
+
+    if (!question.embedding) {
+      return res.json({ similar: [] })
+    }
+
+    const similar = await findSimilarQuestions(question.embedding, {
+      limit: 5,
+      threshold: 0.4,
+      excludeId: question._id
+    })
+
+    res.json({ similar })
+  } catch (error) {
+    console.error('Get similar questions error:', error)
+    res.status(500).json({ message: 'Server error' })
+  }
+})
+
+// @route   GET /api/questions/:id/duplicates
+// @desc    Get flagged duplicates for a question
+// @access  Public
+router.get('/:id/duplicates', async (req, res) => {
+  try {
+    const question = await Question.findById(req.params.id)
+      .select('isDuplicate duplicateFlags duplicateOf')
+      .populate('duplicateOf', 'title')
+      .populate('duplicateFlags.question', 'title')
+
+    if (!question || question.isDeleted) {
+      return res.status(404).json({ message: 'Question not found' })
+    }
+
+    res.json({
+      isDuplicate: question.isDuplicate,
+      duplicateOf: question.duplicateOf,
+      duplicates: question.duplicateFlags || []
+    })
+  } catch (error) {
+    console.error('Get duplicates error:', error)
+    res.status(500).json({ message: 'Server error' })
   }
 })
 

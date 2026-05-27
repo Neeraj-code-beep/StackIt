@@ -21,10 +21,11 @@ import {
 } from 'react-icons/fi';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
-import api from '../utils/api';
+import api, { getSimilarQuestions } from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import CommentSection from '../components/CommentSection';
+import SimilarQuestionsPanel from '../components/SimilarQuestionsPanel';
 
 const QuestionDetailPage = () => {
   const { id } = useParams();
@@ -48,6 +49,19 @@ const QuestionDetailPage = () => {
     {
       staleTime: 30000,
       refetchOnWindowFocus: false,
+    }
+  );
+
+  // Fetch similar questions
+  const {
+    data: similarData,
+    isLoading: similarLoading,
+  } = useQuery(
+    ['similarQuestions', id],
+    () => getSimilarQuestions(id),
+    {
+      enabled: !!id,
+      staleTime: 60000,
     }
   );
 
@@ -226,7 +240,8 @@ const QuestionDetailPage = () => {
   const { question, answers } = questionData;
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-6xl mx-auto flex gap-6">
+      <div className="flex-1 min-w-0">
       {/* Back button */}
       <button
         onClick={() => navigate('/questions')}
@@ -554,6 +569,17 @@ const QuestionDetailPage = () => {
             )}
           </div>
         )}
+      </div>
+      </div>
+
+      {/* Similar Questions Sidebar */}
+      <div className="w-80 flex-shrink-0 hidden lg:block">
+        <div className="sticky top-4">
+          <SimilarQuestionsPanel
+            questions={similarData?.similar || []}
+            loading={similarLoading}
+          />
+        </div>
       </div>
     </div>
   );

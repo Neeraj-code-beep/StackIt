@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { useMutation, useQueryClient } from 'react-query';
@@ -7,19 +7,73 @@ import { toast } from 'react-hot-toast';
 import { FiTag, FiX, FiHelpCircle } from 'react-icons/fi';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
-import api from '../utils/api';
+import api, { checkDuplicate } from '../utils/api';
+import DuplicateWarningBanner from '../components/DuplicateWarningBanner';
+import SimilarQuestionsPanel from '../components/SimilarQuestionsPanel';
 
 const AskQuestionPage = () => {
   const [tags, setTags] = useState([]);
   const [tagInput, setTagInput] = useState('');
   const [content, setContent] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [title, setTitle] = useState('');
+  const [duplicateCheck, setDuplicateCheck] = useState({ loading: false, duplicates: [], similar: [], hasDuplicates: false, hasSimilar: false });
+  const [duplicateWarningDismissed, setDuplicateWarningDismissed] = useState(false);
+  const debounceTimer = useRef(null);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    return () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    };
+  }, []);
+
+  const handleTitleChange = (e) => {
+    const value = e.target.value;
+    setTitle(value);
+
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+
+    const plainContent = content.replace(/<[^>]*>/g, '').trim();
+    if (value.trim().length < 10 && plainContent.length < 10) {
+      setDuplicateCheck({ loading: false, duplicates: [], similar: [], hasDuplicates: false, hasSimilar: false });
+      return;
+    }
+
+    setDuplicateCheck(prev => ({ ...prev, loading: true }));
+    setDuplicateWarningDismissed(false);
+
+    debounceTimer.current = setTimeout(async () => {
+      try {
+        const result = await checkDuplicate({
+          title: value,
+          content: plainContent,
+        });
+        setDuplicateCheck({
+          loading: false,
+          duplicates: result.duplicates || [],
+          similar: result.similar || [],
+          hasDuplicates: result.hasDuplicates || false,
+          hasSimilar: result.hasSimilar || false,
+        });
+      } catch (error) {
+        if (error.response?.status !== 401) {
+          console.error('Duplicate check failed:', error);
+        }
+        setDuplicateCheck({ loading: false, duplicates: [], similar: [], hasDuplicates: false, hasSimilar: false });
+      }
+    }, 400);
+  };
+
+  const handleDismissWarning = () => {
+    setDuplicateWarningDismissed(true);
+  };
 
   const {
     register,
     handleSubmit,
+    setValue,
     formState: { errors },
   } = useForm();
 
@@ -74,7 +128,7 @@ const AskQuestionPage = () => {
     setIsSubmitting(true);
     try {
       await createQuestionMutation.mutateAsync({
-        title: data.title,
+        title: title,
         content: content,
         tags: tags,
       });
@@ -137,23 +191,34 @@ const AskQuestionPage = () => {
             >
               Title *
             </label>
-            <input
-              id="title"
-              type="text"
-              {...register('title', {
-                required: 'Title is required',
-                minLength: {
-                  value: 10,
-                  message: 'Title must be at least 10 characters',
-                },
-                maxLength: {
-                  value: 150,
-                  message: 'Title must be less than 150 characters',
-                },
-              })}
-              className="input-field"
-              placeholder="What's your question? Be specific."
-            />
+            <div className="relative">
+              <input
+                id="title"
+                type="text"
+                {...register('title', {
+                  required: 'Title is required',
+                  minLength: {
+                    value: 10,
+                    message: 'Title must be at least 10 characters',
+                  },
+                  maxLength: {
+                    value: 150,
+                    message: 'Title must be less than 150 characters',
+                  },
+                  onChange: (e) => {
+                    handleTitleChange(e);
+                    setValue('title', e.target.value);
+                  },
+                })}
+                className="input-field pr-10"
+                placeholder="What's your question? Be specific."
+              />
+              {duplicateCheck.loading && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-600"></div>
+                </div>
+              )}
+            </div>
             {errors.title && (
               <p className="mt-1 text-sm text-red-600 dark:text-red-400">
                 {errors.title.message}
@@ -162,6 +227,14 @@ const AskQuestionPage = () => {
             <p className="mt-1 text-sm text-navy-500 dark:text-navy-400">
               Imagine you're asking another person
             </p>
+
+            {!duplicateWarningDismissed && (
+              <DuplicateWarningBanner
+                duplicates={duplicateCheck.duplicates}
+                similar={duplicateCheck.similar}
+                onDismiss={handleDismissWarning}
+              />
+            )}
           </div>
 
           {/* Content */}
@@ -173,7 +246,30 @@ const AskQuestionPage = () => {
               <ReactQuill
                 theme="snow"
                 value={content}
-                onChange={setContent}
+                onChange={(val) => {
+                  setContent(val);
+                  if (title.trim().length >= 10) {
+                    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+                    setDuplicateCheck(prev => ({ ...prev, loading: true }));
+                    debounceTimer.current = setTimeout(async () => {
+                      try {
+                        const result = await checkDuplicate({
+                          title,
+                          content: val.replace(/<[^>]*>/g, '').trim(),
+                        });
+                        setDuplicateCheck({
+                          loading: false,
+                          duplicates: result.duplicates || [],
+                          similar: result.similar || [],
+                          hasDuplicates: result.hasDuplicates || false,
+                          hasSimilar: result.hasSimilar || false,
+                        });
+                      } catch (error) {
+                        setDuplicateCheck({ loading: false, duplicates: [], similar: [], hasDuplicates: false, hasSimilar: false });
+                      }
+                    }, 400);
+                  }
+                }}
                 modules={quillModules}
                 formats={quillFormats}
                 placeholder="Provide all the information someone would need to answer your question..."
@@ -186,6 +282,15 @@ const AskQuestionPage = () => {
               <span>{content.replace(/<[^>]*>/g, '').length} characters</span>
             </div>
           </div>
+
+          {!duplicateWarningDismissed && duplicateCheck.similar.length > 0 && (
+            <div className="mb-6">
+              <SimilarQuestionsPanel
+                questions={duplicateCheck.similar}
+                title="Similar Questions Found"
+              />
+            </div>
+          )}
 
           {/* Tags */}
           <div>

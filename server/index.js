@@ -37,6 +37,7 @@ const tagRoutes = require('./routes/tags');
 const adminRoutes = require('./routes/admin');
 const commentRoutes = require('./routes/comments');
 const notificationRoutes = require('./routes/notifications');
+const searchRoutes = require('./routes/search');
 const { authenticateSocket } = require('./middleware/auth');
 
 const app = express();
@@ -123,6 +124,7 @@ app.use('/api/tags', tagRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/comments', commentRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/search', searchRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
